@@ -1,0 +1,1130 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบรายงานเวรตรวจการ รพร.บ้านดุง</title>
+
+  <!-- เครื่องมือสำหรับจัดหน้าตาและสีสัน (Tailwind CSS) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- เครื่องมือจับภาพหน้าจอ (html2canvas) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <!-- แหล่งรวมไลบรารีของ React และ Firebase -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "recharts": "https://esm.sh/recharts@2.12.3?deps=react@18.2.0,react-dom@18.2.0",
+        "lucide-react": "https://esm.sh/lucide-react@0.364.0?deps=react@18.2.0",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js"
+      }
+    }
+  </script>
+
+  <!-- เครื่องมืออ่านโค้ด React (Babel) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* สไตล์ตกแต่งเพิ่มเติม */
+    body { margin: 0; padding: 0; }
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #10b981; border-radius: 10px; }
+    #matrix-container thead th { position: sticky; top: 0; z-index: 50; }
+    #matrix-container tbody td:first-child { position: sticky; left: 0; z-index: 40; }
+    #matrix-container thead th:first-child { position: sticky; left: 0; z-index: 60; }
+    @media print {
+      aside, header, main > div:not([ref="reportRef"]), .grid { display: none !important; }
+      main { margin-left: 0 !important; }
+      div[ref="reportRef"] { border: none !important; box-shadow: none !important; padding: 0 !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-black">
+  <div id="root"></div>
+
+  <!-- โค้ดแอปพลิเคชันของคุณพยาบาล -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useMemo, useEffect, useRef } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { 
+      BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList, Legend
+    } from 'recharts';
+    import { 
+      LayoutDashboard, ClipboardList, Calendar, Users, 
+      AlertCircle, PlusCircle, Copy, Menu, X, Save, UserCheck, 
+      ChevronLeft, ChevronRight, FileText, Check, Activity, Table as TableIcon, Edit3, Trash2, UserPlus, Star, ImageIcon, Download, Heart, Smile, Settings, Navigation, Printer, Lock, Unlock, ExternalLink, ListFilter, Cloud, Warehouse, ToggleLeft, Search
+    } from 'lucide-react';
+    import { initializeApp } from 'firebase/app';
+    import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+    import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, updateDoc } from 'firebase/firestore';
+
+    // --- Firebase Configuration (ฐานข้อมูลของ รพร.บ้านดุง) ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyDgp3kz9SVKoN1rv21asfoGcOeY53EsNzA",
+      authDomain: "roundwardbandung.firebaseapp.com",
+      projectId: "roundwardbandung",
+      storageBucket: "roundwardbandung.firebasestorage.app",
+      messagingSenderId: "1055670167263",
+      appId: "1:1055670167263:web:fa799b41cf6f6edc35ab6a",
+      measurementId: "G-FHR6MM7RQE"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db_fs = getFirestore(app);
+    const appId = 'bandung-supervisor-app';
+
+    // --- Constants ---
+    const MONTH_NAMES = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+
+    const INITIAL_NURSES = [
+      "นางสาวจันทนา ยุทธไตรินทร์", "นางราตรี มนัสศิลา", "นางปนิตา ปิยะกะโพธิ์", "นางกลอยใจ ประทุมพงษ์",
+      "นส.รัศมี แสงมนตรี", "นางชลิตตา ภูผิวผัน", "นางสรารัตน์ สุมาศรี", "นางพัชรินทร์ พลแพงขวา",
+      "นส.สุกัลยา ดาษดี", "นส.มะลิวรรณ สิทธิมาตย์", "นส.วิภาดา พลแสน", "นางนิตยา ชาดา",
+      "นางเอมอร ปินะกะโพ", "นางวราลักษณ์ กาลจักร", "นส.พรรณี สายศรี", "นายปฐมพงษ์ กว้างขวาง",
+      "นส.สุภิดา เกยดอน", "นางนิตยา นิลเกตุ", "นส.ทิพาภรณ์ พลแก้ว", "นส.รำไพพรรณ ปะจะนัง",
+      "นส.โสภาดา ดุงศรีแก้ว", "นายเจษฎาภรณ์ พันธัง", "นส.พรทิพย์ สีพาชัย", "นางณัฐยา ศรีสุยนต์",
+      "นส.สุพรรณี อุดรเขต", "นส.นฤตวรรณ จันดา"
+    ];
+
+    const ON_CALL_WARDS = ['lr', 'pp', 'snb', 'male', 'female', 'pediatric', 'icu', 'infectious', 'vip4', 'monk'];
+
+    const DEPARTMENTS = [
+      { id: 'opd', name: 'OPD นอกเวลา', short: 'OPD', fields: ['ยกยอดจากเวรเช้า', 'ยอดผู้ป่วย', 'ประเภทสีขาว', 'สีเขียว', 'สีเหลือง', 'ชมพู_แดง_ส่ง_ER', 'admit', 'nurse', 'na'], shifts: ['b'] },
+      { id: 'er', name: 'ER', short: 'ER', fields: ['ยอดผู้ป่วย', 'สีขาว', 'สีเขียว', 'สีเหลือง', 'สีชมพู', 'สีแดง', 'admit', 'refer', 'nurse', 'ent', 'na', 'คนงาน'], shifts: ['b', 'd'] },
+      { id: 'or', name: 'OR', short: 'OR', fields: ['ยอดผู้ป่วย', 'ผ่าตัดใหญ่', 'ผ่าตัดเล็ก', 'หัตถการ', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'lr', name: 'LR', short: 'LR', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'ประเภท5', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'pp', name: 'งานผู้ป่วยหลังคลอด', short: 'PP', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'snb', name: 'SNB', short: 'SNB', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'male', name: 'IPD ชาย', short: 'ชาย', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'female', name: 'IPD หญิง', short: 'หญิง', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'pediatric', name: 'IPD เด็ก', short: 'เด็ก', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'vip4', name: 'พิเศษชั้น 4', short: 'VIP 4', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'vip5', name: 'พิเศษชั้น 5', short: 'VIP 5', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'monk', name: 'หอสงฆ์', short: 'หอสงฆ์', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'icu', name: 'ICU', short: 'ICU', fields: ['ยอดผู้ป่วย', 'ประเภท3', 'ประเภท4', 'ประเภท5', 'nurse', 'na'], shifts: ['b', 'd'] },
+      { id: 'infectious', name: 'IPD ติดเชื้อ', short: 'ติดเชื้อ', fields: ['ยอดผู้ป่วย', 'ประเภท1', 'ประเภท2', 'ประเภท3', 'ประเภท4', 'nurse', 'na'], shifts: ['b', 'd'] }
+    ];
+
+    // --- Static Components ---
+    const NurseCartoonUI = () => (
+      <svg viewBox="0 0 100 100" className="w-16 h-16 md:w-20 md:h-20">
+        <circle cx="50" cy="35" r="22" fill="#FFE4E1" />
+        <path d="M28 35c0-12 12-18 22-18s22 6 22 18c0 6-6 12-22 12s-22-6-22-12z" fill="#3D2B1F" />
+        <circle cx="42" cy="35" r="2.5" fill="#000" />
+        <circle cx="58" cy="35" r="2.5" fill="#000" />
+        <path d="M44 46q6 4 12 0" fill="none" stroke="#F87171" strokeWidth="2.5" strokeLinecap="round" />
+        <path d="M30 65c0-18 10-24 20-24s20 6 20 24v28H30v-28z" fill="#FFF" stroke="#E5E7EB" strokeWidth="1" />
+        <rect x="40" y="12" width="20" height="10" rx="3" fill="#FFF" stroke="#10B981" strokeWidth="2" />
+        <path d="M45 17h10M50 14v6" stroke="#10B981" strokeWidth="2" />
+      </svg>
+    );
+
+    const KPICardUI = ({ title, value, color, icon: Icon }) => {
+      const colors = {
+        emerald: 'border-emerald-500 text-emerald-700 bg-emerald-50',
+        rose: 'border-rose-500 text-rose-700 bg-rose-50',
+        amber: 'border-amber-500 text-amber-700 bg-amber-50',
+        blue: 'border-blue-500 text-blue-700 bg-blue-50'
+      };
+      return (
+        <div className={`bg-white p-5 rounded-3xl shadow-sm border-b-[6px] flex flex-col items-center gap-1 ${colors[color]} transition-all`}>
+          <Icon size={20} className="mb-1 opacity-80" />
+          <div className="text-[10px] font-black uppercase text-black text-center leading-none">{title}</div>
+          <div className="text-2xl font-black text-black leading-none tracking-tighter mt-1">{value}</div>
+        </div>
+      );
+    };
+
+    const SummaryKPUI = ({ label, val, color }) => (
+      <div className="bg-white p-4 rounded-3xl border-2 border-slate-50 shadow-sm flex flex-col items-center font-black">
+        <div className="text-[9px] font-black text-black uppercase mb-1 tracking-tighter leading-none">{label}</div>
+        <div className="text-lg md:text-xl font-black" style={{color: color}}>{val}</div>
+      </div>
+    );
+
+    const PhysicalBookTemplate = ({ data, supervisor, date, monthNames }) => {
+      const d = new Date(date);
+      const getVal = (dept, field, shift) => data[`${dept}_${field}_${shift}`] || "0";
+      const getInc = (dept) => data[`${dept}_incident_val`] || "ปกติ";
+      const getOnCall = (dept) => data[`${dept}_on_call_val`] || "";
+
+      const RenderLine = ({ dept, field }) => (
+        <span className="font-bold underline px-1 text-[16px]">{getVal(dept, field, 'b')} / {getVal(dept, field, 'd')}</span>
+      );
+
+      return (
+        <div className="w-[850px] bg-white p-12 text-black font-sans leading-relaxed border-[20px] border-slate-300">
+          <div className="text-center mb-8 border-b-4 border-black pb-4">
+            <h1 className="text-[26px] font-bold">📄 แบบบันทึกตรวจการการปฏิบัติงานการพยาบาล รพ.บ้านดุง</h1>
+            <p className="text-[18px] mt-2 font-bold">
+              วันที่ <span className="underline px-4">{d.getDate()} {monthNames[d.getMonth()]} {d.getFullYear()+543}</span>
+              เวร <span className="underline px-8">บ่าย / ดึก</span>
+              เวลา <span className="underline px-8">{new Date().toLocaleTimeString('th-TH', {hour:'2-digit', minute:'2-digit'})}</span>
+            </p>
+          </div>
+
+          <div className="space-y-4 text-[15px]">
+            <div className="border-b border-black pb-2">
+              <div className="font-bold text-[17px]">OPD</div>
+              <div>ยอดยกมาจากเวรเช้า <span className="underline">{getVal('opd', 'ยกยอดจากเวรเช้า', 'b')}</span> คน ยอดผู้ป่วย <span className="underline">{getVal('opd', 'ยอดผู้ป่วย', 'b')}</span> คน</div>
+              <div>ขาว <span className="underline">{getVal('opd', 'ประเภทสีขาว', 'b')}</span> เขียว <span className="underline">{getVal('opd', 'สีเขียว', 'b')}</span> เหลือง <span className="underline">{getVal('opd', 'สีเหลือง', 'b')}</span> แดง <span className="underline">{getVal('opd', 'ชมพู_แดง_ส่ง_ER', 'b')}</span></div>
+              <div>Admit <span className="underline">{getVal('opd', 'admit', 'b')}</span> Nurse <span className="underline">{getVal('opd', 'nurse', 'b')}</span> NA <span className="underline">{getVal('opd', 'na', 'b')}</span> | เหตุการณ์: {getInc('opd')}</div>
+              {data['opd_np_active_val'] === 'true' && (
+                 <div className="text-emerald-800 text-[14px] mt-1 font-bold">
+                   * NP นอกเวลา: ยอดผู้ป่วย <span className="underline">{data['opd_np_total_val'] || '0'}</span> ราย, ส่ง ER <span className="underline">{data['opd_np_er_val'] || '0'}</span> ราย | เหตุการณ์: {data['opd_np_incident_val'] || 'ปกติ'}
+                 </div>
+              )}
+            </div>
+
+            <div className="border-b border-black pb-2 font-bold">
+              <div className="font-bold text-[17px]">ER</div>
+              <div>ยอดผู้ป่วย <RenderLine dept="er" field="ยอดผู้ป่วย"/> ราย ขาว <RenderLine dept="er" field="สีขาว"/> เขียว <RenderLine dept="er" field="สีเขียว"/> เหลือง <RenderLine dept="er" field="สีเหลือง"/> แดง <RenderLine dept="er" field="สีแดง"/></div>
+              <div>Admit <RenderLine dept="er" field="admit"/> Refer <RenderLine dept="er" field="refer"/></div>
+            </div>
+
+            {['or', 'lr', 'pp', 'snb', 'male', 'female', 'pediatric'].map(id => (
+               <div key={id} className="border-b border-black pb-2">
+                 <div className="font-bold text-[17px]">{DEPARTMENTS.find(d => d.id === id).name}</div>
+                 <div>ยอด <RenderLine dept={id} field="ยอดผู้ป่วย"/> {DEPARTMENTS.find(d => d.id === id).fields.filter(f => f.startsWith('ประเภท')).map(f => (
+                   <span key={f} className="ml-3">{f.replace('ประเภท', 'T')} <RenderLine dept={id} field={f}/></span>
+                 ))}</div>
+                 <div>Nurse <RenderLine dept={id} field="nurse"/> NA <RenderLine dept={id} field="na"/> | OnCall: {getOnCall(id) || "ปกติ"} | เหตุการณ์: {getInc(id)}</div>
+               </div>
+            ))}
+
+            <div className="border-b border-black pb-2 bg-slate-50 p-2 rounded-lg font-bold text-black">
+              <div className="font-bold text-[17px] uppercase">งานผู้ป่วยพิเศษ (ชั้น 4, 5, หอสงฆ์)</div>
+              <div>ชั้น 4 <RenderLine dept="vip4" field="ยอดผู้ป่วย"/> | ชั้น 5 <RenderLine dept="vip5" field="ยอดผู้ป่วย"/> | หอสงฆ์ <RenderLine dept="monk" field="ยอดผู้ป่วย"/></div>
+              <div>Nurse <span className="font-bold underline px-1">{(Number(getVal('vip4','nurse','b'))+Number(getVal('vip5','nurse','b'))+Number(getVal('monk','nurse','b')))} / {(Number(getVal('vip4','nurse','d'))+Number(getVal('vip5','nurse','d'))+Number(getVal('monk','nurse','d')))}</span> คน</div>
+              <div>กรณีฉุกเฉิน: {getOnCall('vip4')}</div>
+            </div>
+
+            {['icu', 'infectious'].map(id => (
+               <div key={id} className="border-b border-black pb-2">
+                 <div className="font-bold text-[17px]">{DEPARTMENTS.find(d => d.id === id).name}</div>
+                 <div>ยอด <RenderLine dept={id} field="ยอดผู้ป่วย"/> {DEPARTMENTS.find(d => d.id === id).fields.filter(f => f.startsWith('ประเภท')).map(f => (
+                   <span key={f} className="ml-3">{f.replace('ประเภท', 'T')} <RenderLine dept={id} field={f}/></span>
+                 ))}</div>
+                 <div>Nurse <RenderLine dept={id} field="nurse"/> NA <RenderLine dept={id} field="na"/> | OnCall: {getOnCall(id) || "-"}</div>
+               </div>
+            ))}
+          </div>
+
+          <div className="mt-8 border-4 border-black p-5 bg-gray-50 rounded-xl font-bold">
+            <div className="font-bold underline text-[16px]">อุบัติการณ์ / ความเสี่ยง (ภาพรวม):</div>
+            <div className="min-h-[50px] text-[15px] mt-2">{data['all_global_incident_val'] || "- ปกติ -"}</div>
+            <div className="font-bold underline text-[16px] mt-4">แนวทางปรับปรุงแก้ไขเบื้องต้น:</div>
+            <div className="min-h-[50px] text-[15px] mt-2">{data['all_improvement_val'] || "-"}</div>
+          </div>
+
+          <div className="mt-16 flex justify-end">
+            <div className="text-center w-80">
+              <div className="mb-10 border-b border-black border-dotted"></div>
+              <div className="text-[20px] font-bold">({supervisor})</div>
+              <div className="text-[14px] font-bold mt-1 uppercase">พยาบาลเวรตรวจการ</div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    function App() {
+      const [user, setUser] = useState(null);
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+      const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+      const [viewMode, setViewMode] = useState('day');
+      const [rangeStart, setRangeStart] = useState(new Date().toISOString().split('T')[0]);
+      const [rangeEnd, setRangeEnd] = useState(new Date().toISOString().split('T')[0]);
+      const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+      const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+      const [analysisWard, setAnalysisWard] = useState("");
+
+      const [db, setDb] = useState({}); 
+      const [nurseDutyRecord, setNurseDutyRecord] = useState({}); 
+      const [nurses, setNurses] = useState(INITIAL_NURSES);
+      
+      const [isManageMode, setIsManageMode] = useState(false);
+      const [newNurseInput, setNewNurseInput] = useState("");
+
+      const [toastMsg, setToastMsg] = useState(null);
+      const reportRef = useRef(null);
+      const matrixRef = useRef(null);
+      const physicalFormRef = useRef(null);
+
+      const NavItem = ({ id, icon: Icon, label }) => (
+        <button onClick={() => {setActiveTab(id); setIsSidebarOpen(false);}} className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all ${activeTab === id ? 'bg-white text-emerald-950 shadow-xl font-black scale-[1.02]' : 'text-emerald-50 hover:bg-emerald-800/50 font-bold'}`}>
+          <Icon size={20} />
+          <span className="text-[12px] uppercase tracking-wider font-black">{label}</span>
+        </button>
+      );
+
+      const getThaiFullDate = (dateStr) => {
+        const d = new Date(dateStr);
+        const days = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+        return `วัน${days[d.getDay()]}ที่ ${d.getDate()} เดือน ${MONTH_NAMES[d.getMonth()]} ปี พ.ศ. ${d.getFullYear() + 543}`;
+      };
+
+      // --- Init Firebase ---
+      useEffect(() => {
+        const initAuth = async () => {
+          try {
+            await signInAnonymously(auth);
+          } catch (err) { 
+            console.error("Auth Error:", err);
+            // แสดงแจ้งเตือนให้รู้ตัวว่าลืมเปิด Anonymous ใน Firebase
+            if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
+               setToastMsg("⚠️ ลืมเปิดใช้งาน Authentication (Anonymous) ใน Firebase Console ครับ!");
+            } else if (err.code === 'auth/unauthorized-domain') {
+               setToastMsg("⚠️ โดเมนนี้ยังไม่ได้รับอนุญาต (Authorized domains) ใน Firebase");
+            }
+          }
+        };
+        initAuth();
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+          if (currentUser) setUser(currentUser);
+        });
+        return () => unsubscribe();
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+        const nursesRef = doc(db_fs, 'artifacts', appId, 'public', 'data', 'nurseList', 'master');
+        const unsubNurses = onSnapshot(nursesRef, (docSnap) => {
+          if (docSnap.exists()) setNurses(docSnap.data().list || INITIAL_NURSES);
+        });
+        
+        const wardDataRef = collection(db_fs, 'artifacts', appId, 'public', 'data', 'wardDatabase_monthly');
+        const unsubWards = onSnapshot(wardDataRef, (snapshot) => {
+          let mergedDb = {};
+          snapshot.forEach(doc => { mergedDb = { ...mergedDb, ...doc.data() }; });
+          setDb(mergedDb);
+        });
+        
+        const dutyRef = collection(db_fs, 'artifacts', appId, 'public', 'data', 'dutyRecord_monthly');
+        const unsubDuty = onSnapshot(dutyRef, (snapshot) => {
+          let mergedRecords = {};
+          snapshot.forEach(doc => { mergedRecords = { ...mergedRecords, ...doc.data() }; });
+          setNurseDutyRecord(mergedRecords);
+        });
+        return () => { unsubNurses(); unsubWards(); unsubDuty(); };
+      }, [user]);
+
+      const currentDayData = useMemo(() => db[selectedDate] || {}, [db, selectedDate]);
+      const currentSupervisor = useMemo(() => nurseDutyRecord[selectedDate] || "(ยังไม่ได้ระบุรายชื่อ)", [nurseDutyRecord, selectedDate]);
+      const daysInMonthCount = useMemo(() => new Date(selectedYear, selectedMonth + 1, 0).getDate(), [selectedYear, selectedMonth]);
+
+      const targetDates = useMemo(() => {
+        if (viewMode === 'day') return [selectedDate];
+        if (viewMode === 'month') {
+          return Array.from({length: daysInMonthCount}, (_, i) => 
+            `${selectedYear}-${(selectedMonth + 1).toString().padStart(2, '0')}-${(i+1).toString().padStart(2, '0')}`
+          );
+        }
+        const dates = [];
+        let curr = new Date(rangeStart);
+        const end = new Date(rangeEnd);
+        while (curr <= end) { dates.push(curr.toISOString().split('T')[0]); curr.setDate(curr.getDate()+1); }
+        return dates;
+      }, [selectedDate, viewMode, rangeStart, rangeEnd, selectedMonth, selectedYear, daysInMonthCount]);
+
+      const stats = useMemo(() => {
+        let bP = 0, dP = 0, bR = 0, dR = 0, bT4 = 0, dT4 = 0, bT5 = 0, dT5 = 0;
+        const wardSums = {};
+        DEPARTMENTS.forEach(dept => wardSums[dept.id] = { bp: 0, dp: 0, bt4: 0, dt4: 0, bt5: 0, dt5: 0 });
+
+        targetDates.forEach(date => {
+          const data = db[date] || {};
+          DEPARTMENTS.forEach(dept => {
+            const valB = Number(data[`${dept.id}_ยอดผู้ป่วย_b`]) || 0;
+            const valD = Number(data[`${dept.id}_ยอดผู้ป่วย_d`]) || 0;
+            const redB = (dept.id === 'er' ? Number(data['er_สีแดง_b']) : 0) || 0;
+            const redD = (dept.id === 'er' ? Number(data['er_สีแดง_d']) : 0) || 0;
+            
+            const t4b = Number(data[`${dept.id}_ประเภท4_b`]) || Number(data[`${dept.id}_ประเภท1_b`]) || 0;
+            const t4d = Number(data[`${dept.id}_ประเภท4_d`]) || Number(data[`${dept.id}_ประเภท1_d`]) || 0;
+            const t5b = Number(data[`${dept.id}_ประเภท5_b`]) || 0;
+            const t5d = Number(data[`${dept.id}_ประเภท5_d`]) || 0;
+
+            bP += valB; dP += valD; bR += redB; dR += redD;
+            bT4 += t4b; dT4 += t4d; bT5 += t5b; dT5 += t5d;
+            wardSums[dept.id].bp += valB; wardSums[dept.id].dp += valD;
+            wardSums[dept.id].bt4 += t4b; wardSums[dept.id].dt4 += t4d;
+            wardSums[dept.id].bt5 += t5b; wardSums[dept.id].dt5 += t5d;
+          });
+        });
+        return { bP, dP, bR, dR, bT4, dT4, bT5, dT5, wardSums };
+      }, [targetDates, db]);
+
+      const chartData = useMemo(() => {
+        return DEPARTMENTS.map(dept => ({
+          name: dept.short,
+          บ่าย: stats.wardSums[dept.id]?.bp || 0,
+          ดึก: stats.wardSums[dept.id]?.dp || 0,
+        }));
+      }, [stats]);
+
+      const nurseAttendanceStats = useMemo(() => {
+        const counts = {};
+        const daysMap = {};
+        nurses.forEach(n => { counts[n] = 0; daysMap[n] = []; });
+        Object.entries(nurseDutyRecord).forEach(([date, name]) => {
+          const [y, m, d] = date.split('-');
+          if (parseInt(m) === selectedMonth + 1 && parseInt(y) === selectedYear) {
+            if (counts[name] !== undefined) {
+               counts[name]++;
+               daysMap[name].push(parseInt(d));
+            }
+          }
+        });
+        return { counts, daysMap };
+      }, [nurseDutyRecord, selectedMonth, selectedYear, nurses]);
+
+      const analysisWardTotals = useMemo(() => {
+        if (!analysisWard) return {};
+        const deptObj = DEPARTMENTS.find(d => d.id === analysisWard);
+        const totals = {};
+        
+        deptObj.fields.forEach(f => {
+          totals[`${f}_b`] = 0;
+          totals[`${f}_d`] = 0;
+        });
+
+        targetDates.forEach(date => {
+          const dayData = db[date] || {};
+          deptObj.fields.forEach(f => {
+            totals[`${f}_b`] += Number(dayData[`${analysisWard}_${f}_b`]) || 0;
+            totals[`${f}_d`] += Number(dayData[`${analysisWard}_${f}_d`]) || 0;
+          });
+        });
+
+        return totals;
+      }, [analysisWard, targetDates, db]);
+
+      const notify = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 2500); };
+      
+      const handleEntryChange = (deptId, field, shift, value) => {
+        const newDb = { ...db };
+        if (!newDb[selectedDate]) newDb[selectedDate] = {};
+        newDb[selectedDate][`${deptId}_${field}_${shift}`] = value;
+        setDb(newDb);
+      };
+
+      const saveWardData = async (deptId) => {
+        if (!user) {
+            notify("⚠️ กรุณารอเชื่อมต่อฐานข้อมูล หรือเปิดระบบ Anonymous ใน Firebase ครับ");
+            return;
+        }
+        const monthKey = selectedDate.substring(0, 7);
+        const monthDocRef = doc(db_fs, 'artifacts', appId, 'public', 'data', 'wardDatabase_monthly', monthKey);
+        
+        await setDoc(monthDocRef, { [selectedDate]: db[selectedDate] }, { merge: true });
+        notify(`บันทึกข้อมูล ${deptId.toUpperCase()} เรียบร้อย`);
+      };
+
+      const toggleNurseShift = async (name, day) => {
+        if (isManageMode) return;
+        if (!user) {
+            notify("⚠️ กรุณารอเชื่อมต่อฐานข้อมูล หรือเปิดระบบ Anonymous ใน Firebase ครับ");
+            return;
+        }
+        const dKey = `${selectedYear}-${(selectedMonth + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+        const monthKey = dKey.substring(0, 7);
+        
+        const newRecords = { ...nurseDutyRecord, [dKey]: nurseDutyRecord[dKey] === name ? "" : name };
+        setNurseDutyRecord(newRecords);
+        
+        const monthDocRef = doc(db_fs, 'artifacts', appId, 'public', 'data', 'dutyRecord_monthly', monthKey);
+        const currentMonthRecords = Object.keys(newRecords).filter(k => k.startsWith(monthKey)).reduce((acc, k) => { acc[k] = newRecords[k]; return acc; }, {});
+        await setDoc(monthDocRef, currentMonthRecords, { merge: true });
+      };
+
+      const saveMatrixImage = () => {
+        if (window.html2canvas && matrixRef.current) {
+          const element = matrixRef.current;
+          
+          const style = document.createElement('style');
+          style.innerHTML = `
+            #matrix-capture-area th, #matrix-capture-area td { position: static !important; }
+            #matrix-capture-area { font-family: 'Tahoma', sans-serif !important; }
+            #matrix-capture-area span { padding-top: 4px; padding-bottom: 4px; display: inline-block; }
+          `;
+          document.head.appendChild(style);
+
+          window.html2canvas(element, { 
+            scale: 2, 
+            backgroundColor: "#fff",
+            useCORS: true,
+          }).then(canvas => {
+            document.head.removeChild(style);
+            const link = document.createElement('a');
+            link.download = `Schedule_FullMonth_${selectedYear+543}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            notify("ส่งออกตารางเวรแบบเต็มเดือนแล้ว");
+          });
+        } else {
+            notify("รอสักครู่ ระบบกำลังโหลดโมดูลสำหรับจับภาพ...");
+        }
+      };
+
+      const saveReportImage = () => {
+        if (window.html2canvas && reportRef.current) {
+          const element = reportRef.current;
+          
+          const originalStyle = element.getAttribute('style') || '';
+          element.style.width = '1024px';
+          element.style.maxWidth = '1024px';
+          element.style.padding = '40px';
+
+          notify("กำลังเตรียมสร้างรูปภาพ...");
+
+          setTimeout(() => {
+            window.html2canvas(element, { 
+              scale: 2, 
+              backgroundColor: "#f8fafc",
+              windowWidth: 1024,
+              useCORS: true
+            }).then(canvas => {
+              if(originalStyle) {
+                  element.setAttribute('style', originalStyle);
+              } else {
+                  element.removeAttribute('style');
+              }
+
+              const link = document.createElement('a');
+              link.download = `WardReport_Stats_${selectedDate}.png`;
+              link.href = canvas.toDataURL('image/png');
+              link.click();
+              notify("ส่งออกผลการราวเวรเรียบร้อย");
+            }).catch(err => {
+              if(originalStyle) element.setAttribute('style', originalStyle);
+              else element.removeAttribute('style');
+              notify("เกิดข้อผิดพลาดในการบันทึกภาพ");
+            });
+          }, 300);
+        }
+      };
+
+      const savePhysicalFormImage = () => {
+        if (window.html2canvas && physicalFormRef.current) {
+          window.html2canvas(physicalFormRef.current, { 
+            scale: 2, 
+            backgroundColor: "#ffffff",
+            useCORS: true,
+            logging: false
+          }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = `PhotoForm_Record_${selectedDate}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            notify("ส่งออกภาพแบบฟอร์มสำเร็จ");
+          }).catch(() => notify("Export ล้มเหลว"));
+        }
+      };
+
+      const copyLineReport = () => {
+        const d = new Date(selectedDate);
+        const dateStr = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
+        let text = `เรียน หัวหน้ากลุ่มงานการพยาบาล/หัวหน้างานทุกท่าน\nขออนุญาตรายงานเวรตรวจการ\nวันที่ ${dateStr}\n\n`;
+        
+        let count = 1;
+        DEPARTMENTS.forEach((dept) => {
+          const gv = (f, s) => currentDayData[`${dept.id}_${f}_${s}`] || "0";
+          const rawInc = currentDayData[`${dept.id}_incident_val`]?.trim();
+          const incText = rawInc ? `เหตุการณ์: ${rawInc}` : "เหตุการณ์ปกติ ไม่พบอุบัติการณ์ความเสี่ยง";
+
+          if(dept.id === 'opd') {
+            text += `${count++}.OPD นอกเวลา ยอดยกมา ${gv('ยกยอดจากเวรเช้า', 'b')} ราย ยอดทั้งหมด ${gv('ยอดผู้ป่วย', 'b')} ราย admit ${gv('admit', 'b')} ราย ส่ง ER ${gv('ชมพู_แดง_ส่ง_ER', 'b')} ราย ${incText}\n`;
+            if (currentDayData['opd_np_active_val'] === 'true') {
+               const npTotal = currentDayData['opd_np_total_val'] || "0";
+               const npEr = currentDayData['opd_np_er_val'] || "0";
+               const npInc = currentDayData['opd_np_incident_val'] || "ปกติ";
+               text += `   >> NP นอกเวลา ยอดผู้ป่วยทั้งหมด ${npTotal} ราย ส่ง ER ${npEr} ราย เหตุการณ์: ${npInc}\n`;
+            }
+            text += `\n`;
+          } 
+          else if(dept.id === 'er') {
+            text += `${count++}.ER : เวร บ่าย/ดึก ยอด= ${gv('ยอดผู้ป่วย','b')}/${gv('ยอดผู้ป่วย','d')} ราย ผู้ป่วยสีแดง= ${gv('สีแดง','b')}/${gv('สีแดง','d')} ราย admit = ${gv('admit','b')}/${gv('admit','d')} ราย refer = ${gv('refer','b')}/${gv('refer','d')} ราย ${incText}\n\n`;
+          } 
+          else if(dept.id === 'vip4') {
+            const vSumB = Number(currentDayData['vip4_ยอดผู้ป่วย_b']||0) + Number(currentDayData['vip5_ยอดผู้ป่วย_b']||0);
+            const vSumD = Number(currentDayData['vip4_ยอดผู้ป่วย_d']||0) + Number(currentDayData['vip5_ยอดผู้ป่วย_d']||0);
+            const vt4B = (Number(currentDayData['vip4_ประเภท4_b']||currentDayData['vip4_ประเภท1_b']||0)) + (Number(currentDayData['vip5_ประเภท4_b']||currentDayData['vip5_ประเภท1_b']||0));
+            const vt4D = (Number(currentDayData['vip4_ประเภท4_d']||currentDayData['vip4_ประเภท1_d']||0)) + (Number(currentDayData['vip5_ประเภท4_d']||currentDayData['vip5_ประเภท1_d']||0));
+            text += `${count++}.VIP : เวรบ่าย/ดึก ยอด ${vSumB}/${vSumD} ราย ประเภทที่ 4= ${vt4B}/${vt4D} ราย ${incText}\n\n`;
+          }
+          else if(dept.id === 'vip5') return;
+          else if(dept.id === 'icu') {
+            text += `${count++}.ICU: เวรบ่าย/ เวรดึก = ${gv('ยอดผู้ป่วย','b')}/${gv('ยอดผู้ป่วย','d')} ราย ประเภทที่ 5= ${gv('ประเภท5','b')}/${gv('ประเภท5','d')} ราย ประเภทที่ 4 = ${gv('ประเภท4','b')}/${gv('ประเภท4','d')} ราย ${incText}\n\n`;
+          } 
+          else if(dept.id === 'or') {
+            text += `${count++}.OR ยอด ${parseInt(gv('ยอดผู้ป่วย','b')) + parseInt(gv('ยอดผู้ป่วย','d'))} ราย ${incText}\n\n`;
+          }
+          else {
+            const bT4 = gv('ประเภท4','b') || gv('ประเภท1','b') || 0;
+            const dT4 = gv('ประเภท4','d') || gv('ประเภท1','d') || 0;
+            const bT5 = gv('ประเภท5','b') || 0;
+            const dT5 = gv('ประเภท5','d') || 0;
+            const dName = (dept.id === 'female' ? 'IPD หญิง' : dept.id === 'male' ? 'IPD ชาย' : dept.id === 'pediatric' ? 'IPD เด็ก' : dept.id === 'infectious' ? 'IPD ติดเชื้อ' : dept.name);
+            let t5Text = dept.fields.includes('ประเภท5') ? ` ประเภทที่ 5= ${bT5}/${dT5} ราย` : '';
+            text += `${count++}.${dName} : เวรบ่าย/ดึก ยอด ${gv('ยอดผู้ป่วย','b')}/${gv('ยอดผู้ป่วย','d')} ราย ประเภทที่ 4= ${bT4}/${dT4} ราย${t5Text} ${incText}\n\n`;
+          }
+        });
+
+        const otherDepts = currentDayData['all_other_depts_val']?.trim();
+        text += `${count++}.หน่วยงานอื่นๆ : ${otherDepts ? otherDepts : 'ปกติ เหตุการณ์ปกติ ไม่พบอุบัติการณ์ความเสี่ยง'}\n\n`;
+        
+        const globalInc = currentDayData['all_global_incident_val']?.trim();
+        text += `เหตุการณ์อื่นๆ ภาพรวม : ${globalInc ? globalInc : 'ปกติ'}\n\n`;
+        
+        text += `จึงเรียนมาเพื่อโปรดทราบ\n(${currentSupervisor}) พยาบาลเวรตรวจการ\nขอบคุณค่ะ`;
+        
+        const el = document.createElement("textarea"); el.value = text; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el);
+        notify("คัดลอก LINE เรียบร้อย");
+      };
+
+      const addNurse = async () => {
+        if (!user) return;
+        if (newNurseInput.trim()) {
+          const newList = [...nurses, newNurseInput.trim()];
+          const nursesRef = doc(db_fs, 'artifacts', appId, 'public', 'data', 'nurseList', 'master');
+          await setDoc(nursesRef, { list: newList });
+          setNewNurseInput("");
+          notify("เพิ่มรายชื่อเรียบร้อย");
+        }
+      };
+
+      const deleteNurse = async (name) => {
+        if (!user) return;
+        const newList = nurses.filter(n => n !== name);
+        const nursesRef = doc(db_fs, 'artifacts', appId, 'public', 'data', 'nurseList', 'master');
+        await setDoc(nursesRef, { list: newList });
+        notify("ลบรายชื่อเรียบร้อย");
+      };
+
+      return (
+        <div className="fixed inset-0 bg-slate-50 flex font-sans text-black overflow-hidden font-black">
+          
+          <aside className={`fixed inset-y-0 left-0 z-[60] w-72 bg-emerald-950 text-white shadow-2xl transition-transform duration-300 lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} print:hidden font-black`}>
+            <div className="p-6 h-full flex flex-col font-black">
+              <div className="flex items-center gap-3 mb-10 pb-6 border-b border-white/10 font-black">
+                <Activity className="text-emerald-400" size={32} strokeWidth={3} />
+                <h1 className="text-[14px] uppercase tracking-widest leading-tight font-black">รพร.บ้านดุง<br/><span className="text-emerald-500 text-[10px]">Supervisor Smart</span></h1>
+              </div>
+              <nav className="flex-1 space-y-1.5 overflow-y-auto pr-2 custom-scrollbar font-black">
+                <NavItem id="dashboard" icon={LayoutDashboard} label="ภาพรวมระบบ" />
+                <NavItem id="entry" icon={ClipboardList} label="บันทึกรายหน่วยงาน" />
+                <NavItem id="schedule" icon={Calendar} label="ตารางเวรตรวจการ" />
+                <NavItem id="report" icon={FileText} label="สรุปรายงาน" />
+              </nav>
+              <div className="mt-auto p-4 bg-emerald-900/50 rounded-2xl border border-white/5">
+                  <div className="flex items-center gap-2 text-emerald-400 mb-1 opacity-70 text-[10px] uppercase font-black"><UserCheck size={12}/> พยาบาลเวรวันนี้</div>
+                  <div className="truncate text-white text-sm font-bold font-black">{currentSupervisor}</div>
+              </div>
+            </div>
+          </aside>
+
+          <main className="flex-1 lg:ml-72 flex flex-col h-full bg-[#F8FAFC] relative overflow-hidden uppercase font-black print:overflow-visible text-black">
+            <header className="shrink-0 flex items-center justify-between p-4 lg:p-6 bg-white border-b z-40 shadow-sm print:hidden">
+              <div className="flex items-center gap-4">
+                <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden p-2.5 bg-emerald-900 text-white rounded-xl shadow-md font-black"><Menu size={20}/></button>
+                <h2 className="text-xs lg:text-[14px] text-black font-black uppercase font-black">ระบบรายงานเวรตรวจการ กลุ่มงานการพยาบาล โรงพยาบาลสมเด็จพระยุพราชบ้านดุง</h2>
+              </div>
+              <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="bg-slate-100 px-3 py-2 rounded-xl font-bold text-xs border-none focus:ring-2 focus:ring-emerald-500 text-black cursor-pointer shadow-inner"/>
+            </header>
+
+            <div className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar relative print:p-0 print:overflow-visible font-black text-black">
+              
+              {activeTab === 'dashboard' && (
+                <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500 font-black pb-20">
+                  
+                  <div className="text-center font-black mt-4">
+                     <div className="inline-block bg-white px-10 py-6 rounded-[3rem] shadow-xl border-t-8 border-emerald-600 relative">
+                        <div className="absolute -top-5 left-1/2 -translate-x-1/2 bg-emerald-100 text-emerald-800 px-5 py-1.5 rounded-full text-xs font-black border border-emerald-200 shadow-sm flex items-center gap-2 whitespace-nowrap">
+                           <UserCheck size={16}/> พยาบาลเวร: {currentSupervisor}
+                        </div>
+                        <h1 className="text-2xl md:text-4xl font-black text-black tracking-tighter mb-1 mt-2 font-black">{getThaiFullDate(selectedDate)}</h1>
+                        <div className="h-1 w-24 bg-emerald-400 mx-auto rounded-full font-black"></div>
+                     </div>
+                  </div>
+
+                  {/* FILTERS */}
+                  <div className="bg-white p-4 rounded-[2.5rem] shadow-sm border border-slate-200 flex flex-wrap items-center gap-4 w-fit mx-auto font-black">
+                    <button onClick={() => setViewMode('day')} className={`px-5 py-2.5 rounded-2xl text-[11px] font-black transition-all ${viewMode === 'day' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400'}`}>รายวัน</button>
+                    <button onClick={() => setViewMode('month')} className={`px-5 py-2.5 rounded-2xl text-[11px] font-black transition-all ${viewMode === 'month' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400'}`}>รายเดือน</button>
+                    <button onClick={() => setViewMode('range')} className={`px-5 py-2.5 rounded-2xl text-[11px] font-black transition-all ${viewMode === 'range' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400'}`}>ช่วงวันที่</button>
+                    
+                    {viewMode === 'month' && (
+                      <div className="flex items-center gap-2 animate-in slide-in-from-left-2 font-black">
+                        <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="bg-slate-100 px-3 py-2 rounded-xl text-xs font-black outline-none border-none text-black">
+                          {MONTH_NAMES.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                        </select>
+                        <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-slate-100 px-3 py-2 rounded-xl text-xs font-black outline-none border-none text-black">
+                          {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y + 543}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {viewMode === 'range' && (
+                      <div className="flex items-center gap-2 animate-in slide-in-from-left-2 font-black">
+                        <input type="date" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} className="bg-slate-100 px-2 py-2 rounded-xl text-xs font-bold border-none text-black font-black" />
+                        <span className="text-slate-300 font-bold font-black">ถึง</span>
+                        <input type="date" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} className="bg-slate-100 px-2 py-2 rounded-xl text-xs font-bold border-none text-black font-black" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 font-black text-black">
+                    <KPICardUI title="ผู้ป่วยรวม บ/ด" value={`${stats.bP}/${stats.dP}`} color="emerald" icon={Users} />
+                    <KPICardUI title="ประเภท 4 บ/ด" value={`${stats.bT4}/${stats.dT4}`} color="amber" icon={Activity} />
+                    <KPICardUI title="ประเภท 5 บ/ด" value={`${stats.bT5}/${stats.dT5}`} color="blue" icon={PlusCircle} />
+                    <KPICardUI title="เคสสีแดง บ/ด" value={`${stats.bR}/${stats.dR}`} color="rose" icon={AlertCircle} />
+                  </div>
+
+                  <div className="bg-white rounded-[3rem] shadow-sm border border-slate-200 overflow-hidden font-black text-black">
+                    <div className="p-6 bg-slate-50 border-b flex items-center gap-3 font-black">
+                      <TableIcon size={20} className="text-emerald-700" />
+                      <h3 className="font-black text-black uppercase text-sm tracking-widest leading-none">สรุปรายวัน (แผนก | บ | ด | เหตุการณ์)</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-[14px] border-collapse font-black text-black">
+                        <thead>
+                          <tr className="bg-slate-100 text-black uppercase tracking-widest font-black">
+                            <th className="px-6 py-5 border-b font-black">แผนก / ตึก</th>
+                            <th className="px-6 py-5 border-b text-center font-black">ยอด บ</th>
+                            <th className="px-6 py-5 border-b text-center font-black">ยอด ด</th>
+                            <th className="px-6 py-5 border-b font-black">สถานการณ์</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50 font-black">
+                          {DEPARTMENTS.map(dept => (
+                            <tr key={dept.id} className="hover:bg-emerald-50/20 font-black">
+                              <td className="px-6 py-4 font-black uppercase text-black font-black">{dept.name}</td>
+                              <td className="px-6 py-4 text-center font-bold text-emerald-800 font-black">{stats.wardSums[dept.id]?.bp || 0}</td>
+                              <td className="px-6 py-4 text-center font-bold text-blue-800 font-black">{stats.wardSums[dept.id]?.dp || 0}</td>
+                              <td className="px-6 py-4 italic text-[12px] truncate max-w-[300px] text-black font-black">{db[selectedDate]?.[`${dept.id}_incident_val`] || "ปกติ"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* BAR CHART SECTION */}
+                  <div className="bg-white p-6 md:p-8 rounded-[3rem] shadow-sm border border-slate-200 font-black text-black mt-8">
+                     <div className="flex items-center gap-3 mb-6 font-black">
+                        <Activity className="text-emerald-600" size={24}/>
+                        <h3 className="text-lg font-black uppercase tracking-widest leading-none">กราฟแสดงยอดผู้ป่วยแต่ละแผนก (บ่าย/ดึก)</h3>
+                     </div>
+                     <div className="h-[350px] w-full pt-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                           <BarChart data={chartData} margin={{ top: 20, right: 10, left: -20, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0"/>
+                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#475569', fontWeight: 'bold' }} interval={0} angle={-30} textAnchor="end"/>
+                              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#475569', fontWeight: 'bold' }} />
+                              <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                              <Legend wrapperStyle={{ fontSize: '13px', fontWeight: 'bold', paddingTop: '20px' }}/>
+                              <Bar dataKey="บ่าย" fill="#059669" radius={[6, 6, 0, 0]} name="เวรบ่าย">
+                                 <LabelList dataKey="บ่าย" position="top" style={{ fontSize: '12px', fontWeight: 'bold', fill: '#059669' }} />
+                              </Bar>
+                              <Bar dataKey="ดึก" fill="#1e40af" radius={[6, 6, 0, 0]} name="เวรดึก">
+                                 <LabelList dataKey="ดึก" position="top" style={{ fontSize: '12px', fontWeight: 'bold', fill: '#1e40af' }} />
+                              </Bar>
+                           </BarChart>
+                        </ResponsiveContainer>
+                     </div>
+                  </div>
+
+                  {/* DYNAMIC ANALYSIS SECTION */}
+                  <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-200 font-black text-black">
+                     <div className="flex items-center gap-3 mb-6 font-black">
+                        <Search className="text-emerald-600" size={24}/>
+                        <h3 className="text-lg font-black uppercase tracking-widest leading-none">วิเคราะห์ข้อมูลละเอียดรายตึก (ทุกหัวข้อที่กรอก)</h3>
+                     </div>
+                     <div className="flex flex-wrap gap-4 items-end font-black">
+                        <div className="flex-1 min-w-[250px] font-black">
+                           <label className="text-[12px] font-black text-black mb-2 block font-black">เลือกตึกที่ต้องการดูข้อมูลย้อนหลัง</label>
+                           <select value={analysisWard} onChange={(e) => setAnalysisWard(e.target.value)} className="w-full bg-slate-100 px-4 py-3 rounded-xl border-none outline-none font-black text-black">
+                              <option value="">-- กรุณาเลือก --</option>
+                              {DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                           </select>
+                        </div>
+                     </div>
+
+                     {analysisWard && (
+                       <div className="mt-8 animate-in slide-in-from-top-4 overflow-x-auto font-black">
+                          <table className="w-full border-collapse border-2 border-slate-200 text-black font-black">
+                             <thead>
+                                <tr className="bg-emerald-950 text-white font-black text-[12px] uppercase font-black">
+                                   <th className="px-4 py-4 border border-slate-300 text-center font-black">วันที่</th>
+                                   {DEPARTMENTS.find(d => d.id === analysisWard).fields.map(f => (
+                                     <th key={f} className="px-4 py-4 border border-slate-300 text-center font-black">{f.replace(/_/g, ' ')} (บ/ด)</th>
+                                   ))}
+                                   <th className="px-4 py-4 border border-slate-300 font-black">เหตุการณ์</th>
+                                </tr>
+                             </thead>
+                             <tbody>
+                                {targetDates.map(date => {
+                                   const dayData = db[date] || {};
+                                   const deptObj = DEPARTMENTS.find(d => d.id === analysisWard);
+                                   return (
+                                     <tr key={date} className="text-[12px] font-black font-black">
+                                        <td className="px-4 py-3 border border-slate-200 text-center font-bold bg-slate-50 font-black">{new Date(date).toLocaleDateString('th-TH', {day:'2-digit', month:'2-digit', year:'2-digit'})}</td>
+                                        {deptObj.fields.map(f => (
+                                           <td key={f} className="px-4 py-3 border border-slate-200 text-center font-black">
+                                              {String(dayData[`${analysisWard}_${f}_b`] || 0)} / {String(dayData[`${analysisWard}_${f}_d`] || 0)}
+                                           </td>
+                                        ))}
+                                        <td className="px-4 py-3 border border-slate-200 italic font-black">{String(dayData[`${analysisWard}_incident_val`] || "ปกติ")}</td>
+                                     </tr>
+                                   );
+                                })}
+                             </tbody>
+                             <tfoot>
+                                <tr className="bg-emerald-100 text-emerald-900 border-t-4 border-emerald-600 text-[13px] font-black uppercase">
+                                   <td className="px-4 py-4 border border-slate-300 text-center font-black">รวมทั้งหมด</td>
+                                   {DEPARTMENTS.find(d => d.id === analysisWard).fields.map(f => (
+                                      <td key={`total_${f}`} className="px-4 py-4 border border-slate-300 text-center font-black text-emerald-700">
+                                         {analysisWardTotals[`${f}_b`]} / {analysisWardTotals[`${f}_d`]}
+                                      </td>
+                                   ))}
+                                   <td className="px-4 py-4 border border-slate-300 text-center font-black">-</td>
+                                </tr>
+                             </tfoot>
+                          </table>
+                       </div>
+                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: ENTRY */}
+              {activeTab === 'entry' && (
+                <div className="max-w-4xl mx-auto space-y-6 pb-40 animate-in slide-in-from-bottom-4 duration-500 font-black">
+                   <div className="bg-emerald-900 p-8 rounded-[3rem] text-white shadow-lg font-black">
+                        <h3 className="text-xl md:text-2xl font-black mb-1 tracking-widest leading-none uppercase font-black">บันทึกข้อมูลรายหน่วยงาน</h3>
+                        <p className="opacity-70 text-[10px] font-black uppercase mt-2 italic font-black">ตัวหนังสือสีดำเข้ม มองเห็นชัดเจนบนโทรศัพท์ครับ</p>
+                   </div>
+
+                   <div className="space-y-6 font-black">
+                     {DEPARTMENTS.map((dept, idx) => (
+                       <div key={dept.id} className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden border-t-[10px] border-t-emerald-600 font-black">
+                          <div className="px-8 py-5 bg-slate-50 border-b flex justify-between items-center text-black font-black">
+                            <h4 className="font-black text-black text-sm uppercase tracking-widest font-black">{idx + 1}. {dept.name}</h4>
+                            <button onClick={() => saveWardData(dept.id)} className="bg-emerald-700 text-white px-5 py-2.5 rounded-2xl font-black shadow-lg active:scale-95 transition-all flex items-center gap-2 text-[11px] font-black">
+                               <Save size={16}/> บันทึกวอร์ดนี้
+                            </button>
+                          </div>
+                          <div className="p-8 font-black text-black font-black">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 font-black">
+                                <div className="space-y-4 font-black">
+                                  <div className="text-[13px] font-black text-emerald-800 border-b-2 border-emerald-50 pb-2 uppercase tracking-widest font-black">ข้อมูลเวรบ่าย</div>
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-6 font-black">
+                                    {dept.fields.map(f => (
+                                      <div key={f+'_b'}>
+                                        <label className="text-[12px] font-black text-black uppercase block mb-1 leading-none font-black">{f.replace(/_/g, ' ')}</label>
+                                        <input type="number" className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-black text-black outline-none focus:ring-2 focus:ring-emerald-500 text-sm shadow-inner font-black" value={currentDayData[`${dept.id}_${f}_b`] || ''} onChange={(e) => handleEntryChange(dept.id, f, 'b', e.target.value)} />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="space-y-4 font-black">
+                                  <div className="text-[13px] font-black text-blue-800 border-b-2 border-blue-50 pb-2 uppercase tracking-widest font-black">ข้อมูลเวรดึก</div>
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-6 font-black">
+                                    {dept.shifts.includes('d') ? dept.fields.map(f => (
+                                      <div key={f+'_d'}>
+                                        <label className="text-[12px] font-black text-black uppercase block mb-2 leading-none font-black">{f.replace(/_/g, ' ')}</label>
+                                        <input type="number" className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-black text-black outline-none focus:ring-2 focus:ring-blue-400 text-sm shadow-inner font-black" value={currentDayData[`${dept.id}_${f}_d`] || ''} onChange={(e) => handleEntryChange(dept.id, f, 'd', e.target.value)} />
+                                      </div>
+                                    )) : <div className="col-span-2 text-[10px] text-slate-400 italic py-6 text-center border-2 border-dashed border-slate-50 rounded-2xl font-black">แผนกนี้รายงานเฉพาะเวรบ่าย</div>}
+                                  </div>
+                                </div>
+                            </div>
+
+                            {dept.id === 'opd' && (
+                               <div className="mt-8 pt-6 border-t border-slate-100 text-black font-black">
+                                  <label className="flex items-center gap-3 text-[14px] font-black text-emerald-800 cursor-pointer mb-4 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 transition-all hover:bg-emerald-50">
+                                     <input 
+                                        type="checkbox" 
+                                        className="w-5 h-5 accent-emerald-600 rounded cursor-pointer"
+                                        checked={currentDayData['opd_np_active_val'] === 'true'}
+                                        onChange={(e) => handleEntryChange(dept.id, 'np_active', 'val', e.target.checked ? 'true' : 'false')}
+                                     />
+                                     มีเวรพยาบาล NP ตรวจนอกเวลา (08.00 - 16.00 น.)
+                                  </label>
+                                  
+                                  {currentDayData['opd_np_active_val'] === 'true' && (
+                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 animate-in slide-in-from-top-2">
+                                        <div>
+                                           <label className="text-[12px] font-black text-emerald-900 uppercase block mb-1 leading-none font-black">ยอดผู้ป่วย NP (ราย)</label>
+                                           <input type="number" className="w-full bg-white border-2 border-emerald-200 rounded-xl px-4 py-3 font-black text-emerald-900 outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm" placeholder="จำนวน..." value={currentDayData['opd_np_total_val'] || ''} onChange={(e) => handleEntryChange(dept.id, 'np_total', 'val', e.target.value)} />
+                                        </div>
+                                        <div>
+                                           <label className="text-[12px] font-black text-emerald-900 uppercase block mb-1 leading-none font-black">ส่ง ER (ราย)</label>
+                                           <input type="number" className="w-full bg-white border-2 border-emerald-200 rounded-xl px-4 py-3 font-black text-emerald-900 outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm" placeholder="จำนวน..." value={currentDayData['opd_np_er_val'] || ''} onChange={(e) => handleEntryChange(dept.id, 'np_er', 'val', e.target.value)} />
+                                        </div>
+                                        <div>
+                                           <label className="text-[12px] font-black text-emerald-900 uppercase block mb-1 leading-none font-black">เหตุการณ์ NP</label>
+                                           <input type="text" className="w-full bg-white border-2 border-emerald-200 rounded-xl px-4 py-3 font-black text-emerald-900 outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm" placeholder="เช่น ปกติ..." value={currentDayData['opd_np_incident_val'] || ''} onChange={(e) => handleEntryChange(dept.id, 'np_incident', 'val', e.target.value)} />
+                                        </div>
+                                     </div>
+                                  )}
+                               </div>
+                            )}
+
+                            {ON_CALL_WARDS.includes(dept.id) && (
+                               <div className="mt-8 pt-8 border-t border-slate-100 text-black font-black">
+                                  <label className="text-[13px] font-black text-black uppercase mb-3 block tracking-widest italic underline font-black">กรณีเสริมเวร (On Call)</label>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-black">
+                                     {['เข้าเกณฑ์ตาม On call', 'เข้าเกณฑ์ แต่ไม่ได้ตาม', 'ไม่ได้ตาม On call'].map(opt => (
+                                        <button 
+                                           key={opt}
+                                           onClick={() => handleEntryChange(dept.id, 'on_call', 'val', opt)}
+                                           className={`px-4 py-3 rounded-xl border-2 text-[11px] font-black transition-all ${currentDayData[`${dept.id}_on_call_val`] === opt ? 'bg-emerald-600 text-white border-emerald-700 shadow-md font-black' : 'bg-white text-black border-slate-100 hover:border-emerald-200'}`}
+                                        >
+                                           {opt}
+                                        </button>
+                                     ))}
+                                  </div>
+                               </div>
+                            )}
+
+                            <div className="mt-8 pt-8 border-t border-slate-100 text-black font-black">
+                              <label className="text-[12px] font-black text-black uppercase mb-3 block tracking-widest italic underline underline-offset-4 font-black">สรุปสถานการณ์ / อุบัติการณ์ในวอร์ด</label>
+                              <textarea placeholder="ระบุเหตุการณ์สำคัญในวอร์ด..." className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 text-sm font-black text-black focus:ring-2 focus:ring-emerald-500 min-h-[100px] outline-none shadow-inner font-black" value={currentDayData[`${dept.id}_incident_val`] || ''} onChange={(e) => handleEntryChange(dept.id, 'incident', 'val', e.target.value)} />
+                            </div>
+                          </div>
+                       </div>
+                     ))}
+
+                     <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden border-t-[10px] border-t-amber-500 p-8 text-black font-black">
+                        <label className="text-[15px] font-black text-black uppercase mb-3 flex items-center gap-2 font-black">
+                           <Warehouse size={18}/> หน่วยงานอื่นๆ
+                        </label>
+                        <textarea placeholder="ระบุข้อมูลหน่วยงานอื่นๆ ที่เกี่ยวข้อง..." className="w-full bg-amber-50/20 border-2 border-amber-200 rounded-2xl px-5 py-4 text-sm font-black text-black focus:ring-2 focus:ring-amber-500 min-h-[80px] outline-none shadow-inner font-black" value={currentDayData['all_other_depts_val'] || ''} onChange={(e) => handleEntryChange('all', 'other_depts', 'val', e.target.value)} />
+                     </div>
+
+                     <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden border-t-[10px] border-t-rose-600 p-8 text-black font-black">
+                        <label className="text-[13px] font-black text-rose-600 uppercase mb-3 flex items-center gap-2 font-black">
+                           <AlertCircle size={18}/> เหตุการณ์อื่นๆ ภาพรวม (เช่น ลิฟต์ค้าง, น้ำท่วม, ปัญหาอาคาร)
+                        </label>
+                        <textarea placeholder="ระบุอุบัติการณ์ความเสี่ยงหรือเหตุการณ์ภาพรวม..." className="w-full bg-rose-50/20 border-2 border-rose-100 rounded-2xl px-5 py-4 text-sm font-black text-black focus:ring-2 focus:ring-rose-500 min-h-[120px] outline-none shadow-inner font-black" value={currentDayData['all_global_incident_val'] || ''} onChange={(e) => handleEntryChange('all', 'global_incident', 'val', e.target.value)} />
+                        <div className="flex justify-end mt-4">
+                           <button onClick={() => saveWardData('all')} className="bg-rose-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg active:scale-95 transition-all flex items-center gap-2 font-black">
+                              <Save size={18}/> บันทึกเหตุการณ์ภาพรวม
+                           </button>
+                        </div>
+                     </div>
+                   </div>
+                </div>
+              )}
+
+              {/* TAB: SCHEDULE */}
+              {activeTab === 'schedule' && (
+                <div className="max-w-7xl mx-auto space-y-8 pb-32 animate-in fade-in duration-500 font-black">
+                  <div className="bg-white p-8 rounded-[3.5rem] shadow-sm border border-slate-200 font-black text-black">
+                    <h3 className="text-xl font-black text-emerald-900 uppercase mb-6 border-l-4 border-emerald-500 pl-4 tracking-tighter flex items-center gap-2 font-black">
+                      <UserCheck size={24}/> รายชื่อเวรประจำเดือน {MONTH_NAMES[selectedMonth]} พ.ศ. {selectedYear+543}
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 font-black text-black">
+                      {nurses.map((name, i) => {
+                        const days = nurseAttendanceStats.daysMap[name] || [];
+                        return (
+                          <div key={i} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 transition-all hover:bg-white hover:shadow-md font-black">
+                            <div className="flex items-center gap-3">
+                               <div className="text-[10px] bg-emerald-600 text-white w-6 h-6 flex items-center justify-center rounded-full font-black">{i+1}</div>
+                               <div className="text-xs font-black truncate max-w-[150px] text-black font-black">{name}</div>
+                            </div>
+                            <div className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-3 py-1.5 rounded-full border border-emerald-200 font-black">
+                               วันที่: {days.length > 0 ? days.sort((a,b)=>a-b).join(', ') : '-'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-8 rounded-[3.5rem] shadow-sm border border-slate-200 overflow-hidden relative font-black">
+                    <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-8 font-black">
+                      <div>
+                        <h3 className="text-xl font-black text-black tracking-tighter uppercase mb-1 font-black">ลงตารางเวรตรวจการ (บ่าย/ดึก)</h3>
+                        <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest italic font-black">หัวตารางตรึง เลื่อนดูครบทั้งเดือน 31 วัน</p>
+                      </div>
+                      <div className="flex items-center gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-100 shadow-inner font-black">
+                         <button onClick={() => {if (selectedMonth === 0) { setSelectedMonth(11); setSelectedYear(y => y-1); } else setSelectedMonth(m => m-1);}} className="p-3 text-emerald-800 hover:bg-white rounded-xl transition-all font-black"><ChevronLeft size={18}/></button>
+                         <span className="font-black text-emerald-950 text-xs px-6 min-w-[150px] text-center uppercase tracking-widest font-black">{MONTH_NAMES[selectedMonth]} {selectedYear + 543}</span>
+                         <button onClick={() => {if (selectedMonth === 11) { setSelectedMonth(0); setSelectedYear(y => y+1); } else setSelectedMonth(m => m+1);}} className="p-3 text-emerald-800 hover:bg-white rounded-xl transition-all font-black"><ChevronRight size={18}/></button>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-4 mb-6 font-black">
+                      <button onClick={() => setIsManageMode(!isManageMode)} className={`px-8 py-3.5 rounded-2xl font-black text-[11px] uppercase transition-all font-black ${isManageMode ? 'bg-rose-500 text-white' : 'bg-slate-900 text-white'} shadow-xl active:scale-95 flex items-center gap-3 font-black`}>
+                        {isManageMode ? <><X size={18}/> ปิดจัดการ</> : <><Settings size={18}/> จัดการรายชื่อ</>}
+                      </button>
+                      <button onClick={saveMatrixImage} className="px-8 py-3.5 rounded-2xl font-black text-[11px] uppercase bg-white border-2 border-emerald-900 text-black shadow-lg active:scale-95 flex items-center gap-3 font-black">
+                        <ImageIcon size={18} /> บันทึกตารางเวร (เต็มเดือน)
+                      </button>
+                    </div>
+
+                    <div className="overflow-auto border-2 border-black rounded-xl custom-scrollbar font-black text-black">
+                      <div ref={matrixRef} id="matrix-capture-area" className="min-w-max bg-white">
+                        <table className="w-full text-left border-collapse bg-white min-w-[1600px] font-black">
+                          <thead className="sticky top-0 z-50 bg-[#052E16] text-white font-black">
+                            <tr>
+                              <th className="sticky left-0 bg-[#052E16] px-6 py-4 border border-black text-[13px] w-[250px] text-center font-black">รายชื่อพยาบาล</th>
+                              {[...Array(daysInMonthCount)].map((_, i) => (
+                                 <th key={i} className={`px-1 py-4 border border-black text-[12px] w-10 text-center font-black ${new Date(selectedYear, selectedMonth, i+1).getDay() === 0 || new Date(selectedYear, selectedMonth, i+1).getDay() === 6 ? 'bg-emerald-800 text-amber-400' : 'text-white'}`}>
+                                      {i + 1}
+                                 </th>
+                              ))}
+                              <th className="sticky right-0 bg-[#052E16] px-6 py-4 border border-black text-[13px] w-20 text-center font-black">รวม</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-black font-black">
+                            {nurses.map((name, nIdx) => (
+                              <tr key={name} className="hover:bg-emerald-50/50">
+                                <td className="sticky left-0 bg-white group-hover:bg-emerald-50/50 px-6 py-3 border border-black font-black text-[14px] flex items-center justify-between gap-2 shadow-sm text-black">
+                                  <span className="flex-1 whitespace-nowrap leading-loose">{name}</span>
+                                  {isManageMode && <button onClick={() => deleteNurse(name)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg font-black"><Trash2 size={14}/></button>}
+                                </td>
+                                {[...Array(daysInMonthCount)].map((_, dIdx) => {
+                                  const dKey = `${selectedYear}-${(selectedMonth+1).toString().padStart(2,'0')}-${(dIdx+1).toString().padStart(2,'0')}`;
+                                  const isActive = nurseDutyRecord[dKey] === name;
+                                  return (
+                                    <td key={dIdx} onClick={() => toggleNurseShift(name, dIdx + 1)} className={`border border-black text-center cursor-pointer transition-all ${isActive ? 'bg-emerald-600 shadow-inner' : 'bg-white hover:bg-slate-50'}`}>
+                                      {isActive && <div className="w-5 h-5 bg-white rounded-full mx-auto shadow-md border-2 border-emerald-400 animate-in zoom-in-50"></div>}
+                                    </td>
+                                  );
+                                })}
+                                <td className="sticky right-0 bg-white group-hover:bg-emerald-50/50 px-4 py-4 border border-black font-black text-emerald-900 text-center text-base font-black">
+                                  {nurseAttendanceStats.counts[name] || 0}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: REPORT */}
+              {activeTab === 'report' && (
+                <div className="max-w-5xl mx-auto space-y-8 pb-32 animate-in zoom-in-95 duration-500 font-black">
+                  
+                  <div ref={reportRef} className="bg-white p-10 md:p-14 rounded-[3.5rem] border border-slate-100 shadow-2xl relative overflow-hidden font-black text-black">
+                    <div className="absolute top-0 left-0 w-full h-4 bg-emerald-600 font-black"></div>
+                    
+                    <div className="flex flex-col items-center mb-10 text-center font-black">
+                      <NurseCartoonUI />
+                      <h3 className="text-2xl md:text-3xl font-black text-black uppercase mt-4 tracking-tighter leading-none font-black">สรุปรายงานเวรตรวจการ</h3>
+                      <div className="bg-emerald-50 px-8 py-3 rounded-2xl border-2 border-emerald-100 mt-6 font-black">
+                        <div className="text-emerald-950 font-black text-lg">ประจำวันที่ {getThaiFullDate(selectedDate)}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10 font-black text-black">
+                      <SummaryKPUI label="ผู้ป่วยรวม บ/ด" val={`${stats.bP}/${stats.dP}`} color="#065f46" />
+                      <SummaryKPUI label="ประเภท 4 บ/ด" val={`${stats.bT4}/${stats.dT4}`} color="#92400e" />
+                      <SummaryKPUI label="ประเภท 5 บ/ด" val={`${stats.bT5}/${stats.dT5}`} color="#1e40af" />
+                      <SummaryKPUI label="เคสสีแดง บ/ด" val={`${stats.bR}/${stats.dR}`} color="#dc2626" />
+                    </div>
+
+                    <div className="rounded-3xl border-2 border-slate-100 overflow-hidden mb-10 font-black text-black">
+                      <table className="w-full text-[13px] border-collapse bg-white font-black">
+                        <thead>
+                          <tr className="bg-emerald-900 text-white uppercase tracking-widest font-black">
+                            <th className="px-6 py-5 text-left font-black">วอร์ด / แผนก</th>
+                            <th className="px-6 py-5 text-center font-black">ยอด บ/ด</th>
+                            <th className="px-6 py-5 text-center font-black">T4 บ/ด</th>
+                            <th className="px-6 py-5 text-center font-black">T5 บ/ด</th>
+                            <th className="px-6 py-5 text-left font-black">สถานการณ์</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-black">
+                          {DEPARTMENTS.map((dept, idx) => (
+                            <tr key={dept.id} className="hover:bg-emerald-50/20 font-black">
+                              <td className="px-6 py-4 font-black uppercase text-black font-black">{dept.name}</td>
+                              <td className="px-6 py-4 text-center font-black font-black">{stats.wardSums[dept.id].bp}/{stats.wardSums[dept.id].dp}</td>
+                              <td className="px-6 py-4 text-center text-amber-800 font-black">{stats.wardSums[dept.id].bt4}/{stats.wardSums[dept.id].dt4}</td>
+                              <td className="px-6 py-4 text-center text-blue-800 font-black font-black">{stats.wardSums[dept.id].bt5}/{stats.wardSums[dept.id].dt5}</td>
+                              <td className="px-6 py-4 text-black italic max-w-[200px] truncate text-[12px] font-black font-black">
+                                {currentDayData[`${dept.id}_incident_val`] || "ปกติ"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="bg-amber-50 p-6 rounded-3xl border border-amber-100 mb-4 font-black text-black">
+                       <div className="text-[11px] font-black text-amber-700 uppercase mb-2 flex items-center gap-2 font-black"><Warehouse size={14}/> หน่วยงานอื่นๆ:</div>
+                       <div className="text-sm font-black leading-relaxed italic text-black font-black font-black">{currentDayData['all_other_depts_val'] || '-'}</div>
+                    </div>
+
+                    <div className="bg-rose-50 p-6 rounded-3xl border border-rose-100 mb-10 font-black text-black font-black">
+                       <div className="text-[11px] font-black text-rose-600 uppercase mb-2 flex items-center gap-2 font-black font-black"><AlertCircle size={14}/> เหตุการณ์อื่นๆ ภาพรวม:</div>
+                       <div className="text-sm font-black leading-relaxed italic text-black font-black font-black">{currentDayData['all_global_incident_val'] || 'ปกติ'}</div>
+                    </div>
+
+                    <div className="flex flex-col items-center border-t-2 border-dotted border-slate-200 pt-10 font-black text-black">
+                      <div className="text-xl md:text-2xl font-black text-black uppercase mb-1 font-black">({currentSupervisor})</div>
+                      <div className="text-emerald-800 text-[12px] font-bold uppercase tracking-widest leading-none font-black font-black font-black">พยาบาลเวรตรวจการ</div>
+                    </div>
+                  </div>
+
+                  {/* ACTION BUTTONS */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 font-black font-black">
+                      <button onClick={copyLineReport} className="w-full py-6 bg-white text-emerald-950 rounded-[2.5rem] font-black text-lg shadow-xl border-2 border-emerald-900 active:scale-95 transition-all flex items-center justify-center gap-3">
+                        <Copy size={24} /> คัดลอกสรุปสำหรับ LINE
+                      </button>
+                      <button onClick={saveReportImage} className="w-full py-6 bg-emerald-700 text-white rounded-[2.5rem] font-black text-lg shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3 font-black">
+                        <ImageIcon size={24} /> บันทึกสถิติรายงาน (รูป)
+                      </button>
+                      <button onClick={savePhysicalFormImage} className="w-full py-6 bg-emerald-950 text-white rounded-[2.5rem] font-black text-lg shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3 font-black">
+                        <Download size={24} /> ส่งออกเป็นภาพตามสมุด
+                      </button>
+                  </div>
+
+                  {/* HIDDEN TEMPLATE FOR EXPORT (RENDERED OFF-SCREEN) */}
+                  <div style={{ position: 'absolute', left: '-5000px', top: 0, zIndex: -1 }}>
+                    <div ref={physicalFormRef}>
+                      <PhysicalBookTemplate 
+                        data={currentDayData} 
+                        supervisor={currentSupervisor} 
+                        date={selectedDate} 
+                        monthNames={MONTH_NAMES}
+                      />
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+          </main>
+
+          {isSidebarOpen && <div className="fixed inset-0 bg-emerald-950/60 z-[55] lg:hidden backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />}
+          
+          {toastMsg && (
+            <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] bg-emerald-900 text-white px-8 py-4 rounded-[2.5rem] font-black shadow-2xl border border-white/10 animate-in slide-in-from-bottom-10 text-xs uppercase tracking-widest font-black font-black font-black">
+                {toastMsg}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
